@@ -192,7 +192,10 @@ function memCard(mem) {
     if (mem.owner) { const o = document.createElement("span"); o.textContent = "👤 " + mem.owner; meta.appendChild(o); }
     if (mem.deadline) { const d = document.createElement("span"); d.textContent = "⏰ " + mem.deadline; meta.appendChild(d); }
     el.append(head, title);
-    if (meta.children.length) el.appendChild(meta);
+    const ticks = document.createElement("span");
+    ticks.className = "ticks"; ticks.textContent = "\u2713\u2713";
+    meta.appendChild(ticks);
+    el.appendChild(meta);
     return el;
 }
 
