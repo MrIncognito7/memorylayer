@@ -1,0 +1,90 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>MemoryLayer</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <header>
+        <h1>MemoryLayer<span>.</span></h1>
+
+        <p>
+            Your conversations, organised into knowledge.
+        </p>
+    </header>
+
+    <main>
+
+        <!-- CONVERSATION INPUT -->
+        <section class="input-section">
+
+            <h2>Import Conversation</h2>
+
+            <label for="platform">
+                Select platform
+            </label>
+
+            <select id="platform">
+                <option value="whatsapp">
+                    WhatsApp
+                </option>
+
+                <option value="instagram">
+                    Instagram
+                </option>
+            </select>
+
+            <label for="conversation">
+                Paste your conversation
+            </label>
+
+            <textarea
+                id="conversation"
+                placeholder="Alex: Let's use React for the frontend.
+Sam: I'll handle the frontend.
+Rahul: Backend needs to be completed by Friday."
+            ></textarea>
+
+            <button
+                id="processBtn"
+                onclick="processConversation()"
+            >
+                Process Conversation
+            </button>
+
+            <p id="status"></p>
+
+        </section>
+
+
+        <!-- EXTRACTED MEMORIES -->
+        <section class="memory-section">
+
+            <h2>Extracted Memories</h2>
+
+            <div id="memories">
+
+                <p class="empty">
+                    Your extracted memories will appear here.
+                </p>
+
+            </div>
+
+        </section>
+
+    </main>
+
+    <script src="script.js"></script>
+
+</body>
+</html>

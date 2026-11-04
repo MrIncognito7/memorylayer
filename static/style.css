@@ -1,0 +1,127 @@
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background: #f5f6fa;
+    color: #20243a;
+    padding: 35px 8%;
+}
+
+header {
+    margin-bottom: 35px;
+}
+
+header h1 {
+    font-size: 32px;
+}
+
+header h1 span {
+    color: #7257e8;
+}
+
+header p {
+    color: #777;
+    margin-top: 8px;
+}
+
+main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 25px;
+}
+
+section {
+    background: white;
+    padding: 25px;
+    border-radius: 14px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.04);
+}
+
+h2 {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    margin: 15px 0 8px;
+    font-weight: bold;
+}
+
+select,
+textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font: inherit;
+}
+
+textarea {
+    height: 220px;
+    resize: vertical;
+}
+
+button {
+    margin-top: 15px;
+    padding: 13px 20px;
+    border: none;
+    border-radius: 8px;
+    background: #7257e8;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #5c43cf;
+}
+
+.memory-card {
+    border: 1px solid #eee;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 12px;
+}
+
+.memory-card h3 {
+    font-size: 13px;
+    color: #7257e8;
+    margin-bottom: 8px;
+}
+
+.memory-card p {
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.memory-card small {
+    display: block;
+    color: #777;
+    margin-top: 8px;
+}
+
+.empty {
+    color: #888;
+}
+
+#status {
+    margin-top: 12px;
+    font-size: 14px;
+}
+
+@media (max-width: 750px) {
+
+    main {
+        grid-template-columns: 1fr;
+    }
+
+    body {
+        padding: 25px 5%;
+    }
+
+}
