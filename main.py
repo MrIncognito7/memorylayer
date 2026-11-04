@@ -1,26 +1,55 @@
-
-from pathlib import Path
-import sqlite3
 import re
+import sqlite3
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from extractor import WEEKDAYS, clean_lines, keyword_extract, llm_extract
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "memory.db"
+MAX_CHARS = 200_000          # reject absurdly large pastes
+MAX_LINES = 5_000
 
 app = FastAPI(title="MemoryLayer")
 
+@contextmanager
+def db():
+    """Connection that commits on success, rolls back on error and always closes."""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
-# DATABASE CONNECTION
-def get_connection():
-    return sqlite3.connect(DB_PATH)
+
+def _fix_legacy_deadline(value, created_at):
+    """Old rows stored raw words like 'friday'. Turn them into YYYY-MM-DD, or None."""
+    if not value or re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return value
+    try:
+        base = datetime.strptime((created_at or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    v = value.strip().lower()
+    if v in ("today", "tonight", "eod"):
+        return base.isoformat()
+    if v == "tomorrow":
+        return (base + timedelta(days=1)).isoformat()
+    if v in WEEKDAYS:
+        return (base + timedelta(days=(WEEKDAYS.index(v) - base.weekday()) % 7 or 7)).isoformat()
+    return None
 
 
-# CREATE DATABASE TABLE
 def setup_database():
-    with get_connection() as conn:
+    with db() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,174 +62,135 @@ def setup_database():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # upgrade databases created by older versions
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(memories)")]
+        for col in ("group_name", "sender"):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE memories ADD COLUMN {col} TEXT")
+        conn.execute("UPDATE memories SET group_name='Ungrouped' WHERE group_name IS NULL OR group_name=''")
+
+        for r in conn.execute("SELECT id, deadline, created_at FROM memories").fetchall():
+            fixed = _fix_legacy_deadline(r["deadline"], r["created_at"])
+            if fixed != r["deadline"]:
+                conn.execute("UPDATE memories SET deadline=? WHERE id=?", (fixed, r["id"]))
+
+        # remove duplicates left by the old, weaker check, then enforce uniqueness in the DB
+        conn.execute("""
+            DELETE FROM memories WHERE id NOT IN (
+                SELECT MIN(id) FROM memories
+                GROUP BY platform, kind, group_name, COALESCE(sender, ''), source_text)
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_memory
+            ON memories (platform, kind, group_name, COALESCE(sender, ''), source_text)
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_memory_group ON memories (group_name, id)")
 
 
 setup_database()
 
 
-# INPUT MODEL
 class ConversationInput(BaseModel):
     platform: str
     conversation: str
+    group: Optional[str] = None     
+    today: Optional[str] = None     
 
 
-# KEYWORDS FOR EXTRACTION
-DECISION_WORDS = [
-    "let's use",
-    "lets use",
-    "agreed",
-    "final decision",
-    "we decided",
-    "decided to",
-    "we will go with"
-]
-
-TASK_WORDS = [
-    "i'll",
-    "i will",
-    "will handle",
-    "please complete",
-    "please handle",
-    "need to",
-    "can you"
-]
-
-DAYS = (
-    "monday|tuesday|wednesday|thursday|"
-    "friday|saturday|sunday|today|tomorrow"
-)
-
-
-# EXTRACT INFORMATION FROM A MESSAGE
-def extract_memory(speaker, message, platform):
-    text = message.lower()
-
-    kind = None
-
-    if any(word in text for word in DECISION_WORDS):
-        kind = "Decision"
-
-    elif any(word in text for word in TASK_WORDS):
-        kind = "Task"
-
-    if not kind:
+def _parse_today(value):
+    if not value:
         return None
-
-    # DETECT DEADLINES
-    deadline_match = re.search(
-        rf"\b(?:by|before|on)\s+({DAYS})\b",
-        text
-    )
-
-    deadline = (
-        deadline_match.group(1)
-        if deadline_match
-        else None
-    )
-
-    # DETECT OWNER
-    owner = None
-
-    if re.search(r"\b(i'll|i will)\b", text):
-        owner = speaker
-
-    return {
-        "platform": platform,
-        "kind": kind,
-        "title": message,
-        "owner": owner,
-        "deadline": deadline,
-        "source_text": message
-    }
+    try:
+        d = datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return d if abs((d - date.today()).days) <= 2 else None  
 
 
-# API: PROCESS CONVERSATION
 @app.post("/api/process")
 def process_conversation(data: ConversationInput):
-
     platform = data.platform.lower()
+    if platform != "whatsapp":
+        raise HTTPException(status_code=400, detail="Unsupported platform")
+    if len(data.conversation) > MAX_CHARS:
+        raise HTTPException(status_code=413, detail=f"Conversation too long (max {MAX_CHARS:,} characters)")
 
-    if platform not in ["whatsapp", "instagram"]:
-        return {"error": "Unsupported platform"}
+    group = " ".join((data.group or "").split())[:60] or "Ungrouped"
+    lines = clean_lines(data.conversation)
+    if not lines:
+        raise HTTPException(status_code=400, detail="Conversation is empty")
+    if len(lines) > MAX_LINES:
+        raise HTTPException(status_code=413, detail=f"Too many messages (max {MAX_LINES:,})")
 
-    lines = [
-        line.strip()
-        for line in data.conversation.splitlines()
-        if line.strip()
-    ]
+    today = _parse_today(data.today)
+    method, reason = "llm", None
+    try:
+        extracted = llm_extract(lines, today=today)
+    except Exception as e:  
+        reason = str(e)[:200]
+        print(f"[MemoryLayer] LLM extraction failed ({reason}); using keyword fallback")
+        method = "keyword-fallback"
+        extracted = keyword_extract(lines, today=today)
 
-    extracted = []
-
-    with get_connection() as conn:
-
-        for line in lines:
-
-            # DETECT SPEAKER AND MESSAGE
-            match = re.match(
-                r"^([^:]{1,40}):\s*(.*)$",
-                line
+    new = 0
+    with db() as conn:
+        for m in extracted:
+            m["platform"] = platform
+            m["group_name"] = group
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO memories
+                   (platform, kind, title, owner, deadline, source_text, group_name, sender)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (platform, m["kind"], m["title"], m["owner"], m["deadline"],
+                 m["source_text"], group, m["sender"]),
             )
-
-            if match:
-                speaker = match.group(1).strip()
-                message = match.group(2).strip()
-
-            else:
-                speaker = "Unknown"
-                message = line
-
-            memory = extract_memory(
-                speaker,
-                message,
-                platform
-            )
-
-            if memory:
-
-                conn.execute("""
-                    INSERT INTO memories
-                    (platform, kind, title, owner, deadline, source_text)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    memory["platform"],
-                    memory["kind"],
-                    memory["title"],
-                    memory["owner"],
-                    memory["deadline"],
-                    memory["source_text"]
-                ))
-
-                extracted.append(memory)
+            m["is_new"] = cur.rowcount == 1
+            new += cur.rowcount
 
     return {
         "message": "Conversation processed successfully",
-        "count": len(extracted),
-        "memories": extracted
+        "method": method,
+        "fallback_reason": reason,
+        "count": len(extracted),   
+        "new": new,               
+        "memories": extracted,
     }
 
 
-# API: GET ALL MEMORIES
 @app.get("/api/memories")
-def get_memories():
+def get_memories(group: Optional[str] = None,
+                 kind: Optional[str] = Query(None, pattern="^(Decision|Task)$"),
+                 limit: int = Query(1000, ge=1, le=5000),
+                 offset: int = Query(0, ge=0)):
+    sql, args = "SELECT * FROM memories WHERE 1=1", []
+    if group:
+        sql += " AND group_name=?"; args.append(group)
+    if kind:
+        sql += " AND kind=?"; args.append(kind)
+    sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    with db() as conn:
+        return [dict(r) for r in conn.execute(sql, (*args, limit, offset)).fetchall()]
 
-    with get_connection() as conn:
 
-        conn.row_factory = sqlite3.Row
+@app.delete("/api/memories")
+def clear_memories(group: Optional[str] = None, all: bool = False):
+    """Delete every memory of one chat (?group=NAME) or everything (?all=true)."""
+    if not group and not all:
+        raise HTTPException(status_code=400, detail="Pass group=NAME or all=true")
+    with db() as conn:
+        if group:
+            n = conn.execute("DELETE FROM memories WHERE group_name=?", (group,)).rowcount
+        else:
+            n = conn.execute("DELETE FROM memories").rowcount
+    return {"deleted": n}
 
-        rows = conn.execute("""
-            SELECT * FROM memories
-            ORDER BY id DESC
-        """).fetchall()
 
-    return [dict(row) for row in rows]
+@app.delete("/api/memories/{memory_id}")
+def delete_memory(memory_id: int):
+    with db() as conn:
+        if conn.execute("DELETE FROM memories WHERE id=?", (memory_id,)).rowcount == 0:
+            raise HTTPException(status_code=404, detail="Memory not found")
+    return {"deleted": memory_id}
 
 
-# SERVE FRONTEND
-app.mount(
-    "/",
-    StaticFiles(
-        directory=BASE_DIR / "static",
-        html=True
-    ),
-    name="static"
-)
+app.mount("/", StaticFiles(directory=BASE_DIR / "static", html=True), name="static")

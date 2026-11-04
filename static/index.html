@@ -1,90 +1,110 @@
-
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0">
-
-    <title>MemoryLayer</title>
-
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MemoryLayer</title>
+<link rel="stylesheet" href="style.css">
 </head>
+<body data-view="whatsapp">
 
-<body>
+<!-- Small toggle (always visible, both views) -->
+<button class="view-toggle" id="viewToggle" onclick="toggleView()" title="Switch between WhatsApp and MemoryLayer">
+    <span class="tg-label tg-wa">WhatsApp</span>
+    <span class="tg-track"><span class="tg-knob"></span></span>
+    <span class="tg-label tg-ml">MemoryLayer</span>
+</button>
 
-    <header>
-        <h1>MemoryLayer<span>.</span></h1>
-
-        <p>
-            Your conversations, organised into knowledge.
-        </p>
-    </header>
-
-    <main>
-
-        <!-- CONVERSATION INPUT -->
-        <section class="input-section">
-
-            <h2>Import Conversation</h2>
-
-            <label for="platform">
-                Select platform
-            </label>
-
-            <select id="platform">
-                <option value="whatsapp">
-                    WhatsApp
-                </option>
-
-                <option value="instagram">
-                    Instagram
-                </option>
-            </select>
-
-            <label for="conversation">
-                Paste your conversation
-            </label>
-
-            <textarea
-                id="conversation"
-                placeholder="Alex: Let's use React for the frontend.
-Sam: I'll handle the frontend.
-Rahul: Backend needs to be completed by Friday."
-            ></textarea>
-
-            <button
-                id="processBtn"
-                onclick="processConversation()"
-            >
-                Process Conversation
-            </button>
-
-            <p id="status"></p>
-
-        </section>
-
-
-        <!-- EXTRACTED MEMORIES -->
-        <section class="memory-section">
-
-            <h2>Extracted Memories</h2>
-
-            <div id="memories">
-
-                <p class="empty">
-                    Your extracted memories will appear here.
-                </p>
-
+<!-- ============ VIEW 1: WHATSAPP ============ -->
+<div class="view" id="waView">
+    <div class="wa-app">
+        <aside class="wa-sidebar">
+            <div class="wa-side-head">
+                <div class="wa-me">Y</div>
+                <strong>Chats</strong>
             </div>
+            <div class="wa-search"><input id="waSearch" placeholder="Search or start new chat" oninput="waFilter()"></div>
+            <div class="wa-list" id="waList"></div>
+        </aside>
 
+        <section class="wa-chat">
+            <div class="wa-chat-head">
+                <div class="wa-avatar" id="waAvatar">PT</div>
+                <div class="wa-chat-title">
+                    <strong id="waName">Project Team</strong>
+                    <small id="waMembers">Alex, Rahul, You</small>
+                </div>
+            </div>
+            <div class="wa-messages" id="waMessages"></div>
+            <div class="wa-composer">
+                <input id="waInput" placeholder="Type a message" autocomplete="off">
+                <button onclick="waSend()" title="Send">➤</button>
+            </div>
         </section>
+    </div>
+</div>
 
-    </main>
+<!-- ============ VIEW 2: MEMORYLAYER PROTOTYPE ============ -->
+<div class="view" id="mlView">
+    <div class="ml-app">
+        <header class="ml-header">
+            <h1>MemoryLayer<span>.</span></h1>
+            <p>Your conversations, organised into knowledge.</p>
+        </header>
 
-    <script src="script.js"></script>
+        <main class="ml-grid">
+            <!-- Paste & process -->
+            <section class="ml-card">
+                <h2>Paste &amp; process a chat</h2>
+                <p class="muted">Paste messages from a WhatsApp chat. We pull out decisions and tasks.</p>
 
+                <div class="row">
+                    <input type="hidden" id="platform" value="whatsapp">
+                    <div class="field">
+                        <label for="groupName">Chat name</label>
+                        <input type="text" id="groupName" placeholder="e.g. Project Team" maxlength="60" autocomplete="off">
+                    </div>
+                    <div class="field actions-inline">
+                        <button class="ghost" onclick="useCurrentChat()">↙ Use current WhatsApp chat</button>
+                        <button class="ghost" onclick="document.getElementById('chatFile').click()">⇧ Import .txt</button>
+                        <input type="file" id="chatFile" accept=".txt,text/plain" hidden onchange="importChat(event)">
+                    </div>
+                </div>
+
+                <label for="pasteText">Conversation</label>
+                <textarea id="pasteText" placeholder="Alex: Let's use React for the frontend.&#10;Sam: I'll handle the frontend by Friday.&#10;Rahul: Backend needs to be completed by Monday."></textarea>
+
+                <div class="footer">
+                    <button class="ghost" onclick="clearPaste()">Clear</button>
+                    <button class="primary" id="processBtn" onclick="processChat()">Process conversation ✦</button>
+                </div>
+                <div class="status" id="status"></div>
+            </section>
+
+            <!-- Latest result -->
+            <section class="ml-card">
+                <h2>Extracted memories</h2>
+                <p class="muted" id="resultHint">Results from your latest run appear here.</p>
+                <div class="mem-list" id="results"></div>
+            </section>
+
+            <!-- Saved memories -->
+            <section class="ml-card wide">
+                <div class="saved-head">
+                    <h2>All saved memories <span class="count" id="savedCount">0</span></h2>
+                    <button class="ghost danger" id="clearAllBtn" onclick="clearMemories()">Clear all</button>
+                    <div class="chips" id="kindFilter">
+                        <button class="chip active" data-kind="all">All</button>
+                        <button class="chip" data-kind="Decision">Decisions</button>
+                        <button class="chip" data-kind="Task">Tasks</button>
+                    </div>
+                </div>
+                <div id="saved"></div>
+            </section>
+        </main>
+    </div>
+</div>
+
+<script src="script.js"></script>
 </body>
 </html>
